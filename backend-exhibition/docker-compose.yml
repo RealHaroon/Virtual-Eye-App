@@ -1,0 +1,10 @@
+version: '3.8'
+
+services:
+  virtual-eye-backend:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./yolov8n.pt:/app/yolov8n.pt
+    restart: unless-stopped

@@ -14,7 +14,11 @@ app.add_middleware(
 )
 
 # model = YOLO("yolov8n.pt")
-model = YOLO("yolov8s.pt")
+# model = YOLO("yolov8s.pt")
+model = YOLO("yolov8m.pt")
+# model = YOLO("yolov8l.pt")
+
+
 ocr_reader = easyocr.Reader(['en'], gpu=False)  # downloads model on first run
 
 def get_horizontal_position(box, img_width):

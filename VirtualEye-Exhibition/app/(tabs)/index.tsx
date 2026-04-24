@@ -7,11 +7,11 @@ import {
   StatusBar, Animated, Dimensions
 } from 'react-native';
 
-// const BACKEND = 'http://192.168.100.15:8000';
+const BACKEND = 'http://192.168.100.15:8000';
 
 
 // const BACKEND = 'http://192.168.43.160:8000';
-const BACKEND = 'http://10.182.192.81:8000';
+// const BACKEND = 'http://10.182.192.81:8000';
 
 
 const { width } = Dimensions.get('window');

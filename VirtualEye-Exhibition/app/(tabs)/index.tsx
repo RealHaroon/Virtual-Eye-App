@@ -4,38 +4,50 @@ import * as Haptics from 'expo-haptics';
 import { useRef, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  StatusBar, Animated, Dimensions
+  StatusBar, Animated
 } from 'react-native';
 
 const BACKEND = 'http://192.168.100.15:8000';
 
+// Soft calm voice for normal detections
+const speak = (text: string) => {
+  Speech.stop();
+  Speech.speak(text, {
+    language: 'en',
+    rate: 0.75,
+    pitch: 0.90,
+    volume: 1.0,
+  });
+};
 
-// const BACKEND = 'http://192.168.43.160:8000';
-// const BACKEND = 'http://10.182.192.81:8000';
-
-
-const { width } = Dimensions.get('window');
+// Slightly urgent but still calm for warnings
+const speakWarning = (text: string) => {
+  Speech.stop();
+  Speech.speak(text, {
+    language: 'en',
+    rate: 0.88,
+    pitch: 0.80,
+    volume: 1.0,
+  });
+};
 
 export default function HomeScreen() {
   const [permission, requestPermission] = useCameraPermissions();
-  const [status, setStatus] = useState('Press Start to begin');
+  const [status, setStatus] = useState('Tap anywhere to start');
   const [running, setRunning] = useState(false);
   const [isWarning, setIsWarning] = useState(false);
-  const [started, setStarted] = useState(false); // splash control
 
   const cameraRef = useRef<CameraView>(null);
   const intervalRef = useRef<any>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const warningAnim = useRef(new Animated.Value(0)).current;
-  const splashAnim = useRef(new Animated.Value(0)).current;
 
-  // Splash fade in
+  // Speak welcome instructions when app opens
   useEffect(() => {
-    Animated.timing(splashAnim, {
-      toValue: 1,
-      duration: 800,
-      useNativeDriver: true,
-    }).start();
+    const timer = setTimeout(() => {
+      speak('Welcome to Virtual Eye. Tap anywhere on the screen to start scanning your environment.');
+    }, 800);
+    return () => clearTimeout(timer);
   }, []);
 
   // Pulse animation when running
@@ -43,8 +55,8 @@ export default function HomeScreen() {
     if (running) {
       Animated.loop(
         Animated.sequence([
-          Animated.timing(pulseAnim, { toValue: 1.15, duration: 800, useNativeDriver: true }),
-          Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1.12, duration: 900, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1, duration: 900, useNativeDriver: true }),
         ])
       ).start();
     } else {
@@ -70,7 +82,10 @@ export default function HomeScreen() {
 
   const startDetection = () => {
     setRunning(true);
+    setIsWarning(false);
     setStatus('Scanning environment...');
+    speak('Detection started. Scanning your environment.');
+
     intervalRef.current = setInterval(async () => {
       try {
         if (!cameraRef.current) return;
@@ -88,22 +103,34 @@ export default function HomeScreen() {
 
         if (warning) {
           await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          speakWarning(text);
+        } else {
+          speak(text);
         }
-
-        Speech.speak(text, { language: 'en', rate: warning ? 1.1 : 0.85 });
       } catch (e) {
-        setStatus('❌ Cannot reach backend. Check WiFi & IP.');
+        const errMsg = 'Cannot reach server. Please check your connection.';
+        setStatus('❌ ' + errMsg);
         setIsWarning(false);
+        speak(errMsg);
       }
-    }, 3000);
+    }, 3500); // slightly longer interval for calmer experience
   };
 
   const stopDetection = () => {
     clearInterval(intervalRef.current);
     setRunning(false);
     setIsWarning(false);
-    setStatus('Press Start to begin');
-    Speech.stop();
+    setStatus('Tap anywhere to start');
+    speak('Detection stopped. Tap anywhere to start again.');
+  };
+
+  // Toggle on tap anywhere
+  const handleScreenTap = () => {
+    if (running) {
+      stopDetection();
+    } else {
+      startDetection();
+    }
   };
 
   useEffect(() => {
@@ -112,52 +139,37 @@ export default function HomeScreen() {
 
   // Permission screen
   if (!permission) return <View style={styles.container} />;
+
   if (!permission.granted) {
     return (
-      <View style={styles.permissionContainer}>
+      <TouchableOpacity
+        style={styles.permissionContainer}
+        onPress={requestPermission}
+        activeOpacity={0.9}
+      >
         <Text style={styles.permissionIcon}>📷</Text>
         <Text style={styles.permissionTitle}>Camera Access Needed</Text>
-        <Text style={styles.permissionSub}>Virtual Eye needs your camera to detect objects and guide you</Text>
-        <TouchableOpacity onPress={requestPermission} style={styles.btnStart}>
-          <Text style={styles.btnText}>Allow Camera</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  // Splash / intro screen
-  if (!started) {
-    return (
-      <Animated.View style={[styles.splashContainer, { opacity: splashAnim }]}>
-        <Text style={styles.splashIcon}>👁️</Text>
-        <Text style={styles.splashTitle}>Virtual Eye</Text>
-        <Text style={styles.splashSubtitle}>AI Assistant for the{'\n'}Visually Impaired</Text>
-        <View style={styles.splashDivider} />
-        <Text style={styles.splashDesc}>
-          Point your camera at the environment.{'\n'}
-          The app will detect objects and{'\n'}
-          guide you using voice commands.
+        <Text style={styles.permissionSub}>
+          Tap anywhere to allow camera access
         </Text>
-        <TouchableOpacity
-          style={styles.btnStart}
-          onPress={() => setStarted(true)}
-        >
-          <Text style={styles.btnText}>Get Started →</Text>
-        </TouchableOpacity>
-      </Animated.View>
+      </TouchableOpacity>
     );
   }
 
-  // Main camera screen
   return (
-    <View style={styles.container}>
+    // Entire screen is tappable — blind user just taps anywhere
+    <TouchableOpacity
+      style={styles.container}
+      onPress={handleScreenTap}
+      activeOpacity={1}
+    >
       <StatusBar barStyle="light-content" backgroundColor="#000" />
       <CameraView ref={cameraRef} style={styles.camera} facing="back" />
 
-      {/* Warning red flash */}
+      {/* Warning red flash overlay */}
       <Animated.View
         style={[styles.warningOverlay, {
-          opacity: warningAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.3] })
+          opacity: warningAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.25] })
         }]}
         pointerEvents="none"
       />
@@ -173,28 +185,30 @@ export default function HomeScreen() {
 
         {/* Status box */}
         <View style={[styles.statusBox, isWarning && styles.statusBoxWarning]}>
-          <Text style={styles.statusIcon}>{isWarning ? '⚠️' : running ? '🔍' : '💤'}</Text>
+          <Text style={styles.statusIcon}>
+            {isWarning ? '⚠️' : running ? '🔍' : '💤'}
+          </Text>
           <Text style={[styles.statusText, isWarning && styles.statusTextWarning]}>
             {status}
           </Text>
         </View>
 
-        {/* Start / Stop button with pulse */}
+        {/* Big tap button with pulse */}
         <Animated.View style={{ transform: [{ scale: pulseAnim }], width: '100%' }}>
-          <TouchableOpacity
-            style={running ? styles.btnStop : styles.btnStart}
-            onPress={running ? stopDetection : startDetection}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.btnText}>{running ? '⏹  Stop Detection' : '▶  Start Detection'}</Text>
-          </TouchableOpacity>
+          <View style={running ? styles.btnStop : styles.btnStart}>
+            <Text style={styles.btnText}>
+              {running ? '⏹  Tap to Stop' : '▶  Tap to Start'}
+            </Text>
+          </View>
         </Animated.View>
 
         <Text style={styles.hint}>
-          {running ? 'Detecting every 3 seconds...' : 'Tap Start to begin scanning'}
+          {running
+            ? 'Tap anywhere on screen to stop'
+            : 'Tap anywhere on screen to start'}
         </Text>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -208,24 +222,7 @@ const styles = StyleSheet.create({
   },
   permissionIcon: { fontSize: 60, marginBottom: 16 },
   permissionTitle: { color: '#fff', fontSize: 22, fontWeight: 'bold', marginBottom: 10 },
-  permissionSub: { color: '#aaa', fontSize: 14, textAlign: 'center', marginBottom: 32 },
-
-  // Splash
-  splashContainer: {
-    flex: 1, backgroundColor: '#0a0a0a',
-    justifyContent: 'center', alignItems: 'center', padding: 32
-  },
-  splashIcon: { fontSize: 72, marginBottom: 16 },
-  splashTitle: { color: '#fff', fontSize: 36, fontWeight: 'bold', marginBottom: 8 },
-  splashSubtitle: { color: '#4fc3f7', fontSize: 16, textAlign: 'center', marginBottom: 24 },
-  splashDivider: {
-    width: 48, height: 2, backgroundColor: '#01696f',
-    borderRadius: 2, marginBottom: 24
-  },
-  splashDesc: {
-    color: '#888', fontSize: 14, textAlign: 'center',
-    lineHeight: 22, marginBottom: 40
-  },
+  permissionSub: { color: '#aaa', fontSize: 14, textAlign: 'center' },
 
   // Camera
   camera: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
@@ -244,9 +241,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24, zIndex: 2
   },
   topBarTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  liveDot: {
-    width: 10, height: 10, borderRadius: 5, backgroundColor: '#555'
-  },
+  liveDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#555' },
   liveDotActive: { backgroundColor: '#4caf50' },
 
   // Bottom overlay
@@ -262,7 +257,7 @@ const styles = StyleSheet.create({
   statusBox: {
     backgroundColor: 'rgba(255,255,255,0.07)',
     borderRadius: 16, paddingVertical: 16, paddingHorizontal: 20,
-    marginBottom: 20, width: '100%', minHeight: 80,
+    marginBottom: 20, width: '100%', minHeight: 90,
     justifyContent: 'center', alignItems: 'center',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)'
   },
@@ -270,23 +265,23 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,60,60,0.15)',
     borderColor: 'rgba(255,60,60,0.4)'
   },
-  statusIcon: { fontSize: 22, marginBottom: 6 },
+  statusIcon: { fontSize: 24, marginBottom: 8 },
   statusText: { color: '#4fc3f7', fontSize: 15, textAlign: 'center', lineHeight: 22 },
   statusTextWarning: { color: '#ff6b6b', fontWeight: '700', fontSize: 16 },
 
   // Buttons
   btnStart: {
-    backgroundColor: '#01696f', paddingVertical: 16,
+    backgroundColor: '#01696f', paddingVertical: 18,
     borderRadius: 30, width: '100%', alignItems: 'center',
     shadowColor: '#01696f', shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4, shadowRadius: 12, elevation: 8
   },
   btnStop: {
-    backgroundColor: '#a12c7b', paddingVertical: 16,
+    backgroundColor: '#a12c7b', paddingVertical: 18,
     borderRadius: 30, width: '100%', alignItems: 'center',
     shadowColor: '#a12c7b', shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4, shadowRadius: 12, elevation: 8
   },
-  btnText: { color: '#fff', fontSize: 18, fontWeight: '700' },
-  hint: { color: '#555', fontSize: 12, marginTop: 12 },
+  btnText: { color: '#fff', fontSize: 20, fontWeight: '700' },
+  hint: { color: '#666', fontSize: 12, marginTop: 12 },
 });

@@ -9,48 +9,45 @@ import {
 
 const BACKEND = 'http://192.168.100.15:8000';
 
-// Soft calm voice for normal detections
-const speak = (text: string) => {
-  Speech.stop();
-  Speech.speak(text, {
-    language: 'en',
-    rate: 0.75,
-    pitch: 0.90,
-    volume: 1.0,
+// Wait until speech is fully done
+const speakAndWait = (text: string, rate = 0.55, pitch = 1.0): Promise<void> => {
+  return new Promise((resolve) => {
+    Speech.stop();
+    Speech.speak(text, {
+      language: 'en-US',
+      rate,
+      pitch,
+      volume: 1.0,
+      onDone: () => resolve(),
+      onError: () => resolve(), // resolve even on error so loop continues
+      onStopped: () => resolve(),
+    });
   });
 };
 
-// Slightly urgent but still calm for warnings
-const speakWarning = (text: string) => {
-  Speech.stop();
-  Speech.speak(text, {
-    language: 'en',
-    rate: 0.88,
-    pitch: 0.80,
-    volume: 1.0,
-  });
-};
+// Small pause between detections (ms)
+const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 export default function HomeScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [status, setStatus] = useState('Tap anywhere to start');
   const [running, setRunning] = useState(false);
   const [isWarning, setIsWarning] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
 
   const cameraRef = useRef<CameraView>(null);
-  const intervalRef = useRef<any>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const warningAnim = useRef(new Animated.Value(0)).current;
+  const runningRef = useRef(false); // track running state inside async loop
 
-  // Speak welcome instructions when app opens
+  // Welcome message on launch
   useEffect(() => {
     const timer = setTimeout(() => {
-      speak('Welcome to Virtual Eye. Tap anywhere on the screen to start scanning your environment.');
+      speakAndWait('Welcome to Virtual Eye. Tap anywhere on the screen to start scanning your environment.');
     }, 800);
     return () => clearTimeout(timer);
   }, []);
 
-  // Pulse animation when running
+  // Pulse when running
   useEffect(() => {
     if (running) {
       Animated.loop(
@@ -65,32 +62,15 @@ export default function HomeScreen() {
     }
   }, [running]);
 
-  // Warning flash animation
-  useEffect(() => {
-    if (isWarning) {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(warningAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
-          Animated.timing(warningAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
-        ])
-      ).start();
-    } else {
-      warningAnim.stopAnimation();
-      warningAnim.setValue(0);
-    }
-  }, [isWarning]);
+  const detectionLoop = async () => {
+    await speakAndWait('Detection started. I will guide you through your surroundings.');
 
-  const startDetection = () => {
-    setRunning(true);
-    setIsWarning(false);
-    setStatus('Scanning environment...');
-    speak('Detection started. Scanning your environment.');
-
-    intervalRef.current = setInterval(async () => {
+    while (runningRef.current) {
       try {
-        if (!cameraRef.current) return;
-        const photo = await cameraRef.current.takePictureAsync({ quality: 0.3 });
-        if (!photo) return;
+        if (!cameraRef.current) break;
+
+        const photo = await cameraRef.current.takePictureAsync({ quality: 0.4 });
+        if (!photo || !runningRef.current) break;
 
         const formData = new FormData();
         formData.append('file', { uri: photo.uri, type: 'image/jpeg', name: 'frame.jpg' } as any);
@@ -98,46 +78,62 @@ export default function HomeScreen() {
         const res = await fetch(`${BACKEND}/detect`, { method: 'POST', body: formData });
         const { text, warning } = await res.json();
 
+        if (!runningRef.current) break; // stopped while waiting for response
+
         setStatus(text);
         setIsWarning(warning);
 
         if (warning) {
           await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          speakWarning(text);
+          await speakAndWait(text, 0.65, 0.95); // slightly faster for warnings
         } else {
-          speak(text);
+          await speakAndWait(text, 0.55, 1.0); // calm and full speed
         }
+
+        // Short pause after speech before next scan
+        if (runningRef.current) await sleep(1500);
+
       } catch (e) {
+        if (!runningRef.current) break;
         const errMsg = 'Cannot reach server. Please check your connection.';
         setStatus('❌ ' + errMsg);
         setIsWarning(false);
-        speak(errMsg);
+        await speakAndWait(errMsg);
+        await sleep(4000); // wait longer on error before retrying
       }
-    }, 3500); // slightly longer interval for calmer experience
-  };
-
-  const stopDetection = () => {
-    clearInterval(intervalRef.current);
-    setRunning(false);
-    setIsWarning(false);
-    setStatus('Tap anywhere to start');
-    speak('Detection stopped. Tap anywhere to start again.');
-  };
-
-  // Toggle on tap anywhere
-  const handleScreenTap = () => {
-    if (running) {
-      stopDetection();
-    } else {
-      startDetection();
     }
   };
 
-  useEffect(() => {
-    return () => clearInterval(intervalRef.current);
-  }, []);
+  const startDetection = () => {
+    runningRef.current = true;
+    setRunning(true);
+    setIsWarning(false);
+    setStatus('Scanning environment...');
+    detectionLoop();
+  };
 
-  // Permission screen
+  const stopDetection = () => {
+    runningRef.current = false;
+    setRunning(false);
+    setIsWarning(false);
+    setStatus('Tap anywhere to start');
+    Speech.stop();
+    speakAndWait('Detection stopped. Tap anywhere to start again.');
+  };
+
+  const handleScreenTap = () => {
+    if (running) stopDetection();
+    else startDetection();
+  };
+
+  const toggleTorch = () => {
+    setTorchOn(prev => {
+      const next = !prev;
+      speakAndWait(next ? 'Flashlight on.' : 'Flashlight off.');
+      return next;
+    });
+  };
+
   if (!permission) return <View style={styles.container} />;
 
   if (!permission.granted) {
@@ -149,41 +145,43 @@ export default function HomeScreen() {
       >
         <Text style={styles.permissionIcon}>📷</Text>
         <Text style={styles.permissionTitle}>Camera Access Needed</Text>
-        <Text style={styles.permissionSub}>
-          Tap anywhere to allow camera access
-        </Text>
+        <Text style={styles.permissionSub}>Tap anywhere to allow camera access</Text>
       </TouchableOpacity>
     );
   }
 
   return (
-    // Entire screen is tappable — blind user just taps anywhere
     <TouchableOpacity
       style={styles.container}
       onPress={handleScreenTap}
       activeOpacity={1}
     >
       <StatusBar barStyle="light-content" backgroundColor="#000" />
-      <CameraView ref={cameraRef} style={styles.camera} facing="back" />
 
-      {/* Warning red flash overlay */}
-      <Animated.View
-        style={[styles.warningOverlay, {
-          opacity: warningAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.25] })
-        }]}
-        pointerEvents="none"
+      <CameraView
+        ref={cameraRef}
+        style={styles.camera}
+        facing="back"
+        enableTorch={torchOn}
       />
 
       {/* Top bar */}
       <View style={styles.topBar}>
         <Text style={styles.topBarTitle}>👁️ Virtual Eye</Text>
-        <View style={[styles.liveDot, running && styles.liveDotActive]} />
+        <View style={styles.topBarRight}>
+          <TouchableOpacity
+            onPress={(e) => { e.stopPropagation(); toggleTorch(); }}
+            style={[styles.torchBtn, torchOn && styles.torchBtnActive]}
+          >
+            <Text style={styles.torchIcon}>🔦</Text>
+            <Text style={styles.torchLabel}>{torchOn ? 'ON' : 'OFF'}</Text>
+          </TouchableOpacity>
+          <View style={[styles.liveDot, running && styles.liveDotActive]} />
+        </View>
       </View>
 
       {/* Bottom panel */}
       <View style={styles.overlay}>
-
-        {/* Status box */}
         <View style={[styles.statusBox, isWarning && styles.statusBoxWarning]}>
           <Text style={styles.statusIcon}>
             {isWarning ? '⚠️' : running ? '🔍' : '💤'}
@@ -193,7 +191,6 @@ export default function HomeScreen() {
           </Text>
         </View>
 
-        {/* Big tap button with pulse */}
         <Animated.View style={{ transform: [{ scale: pulseAnim }], width: '100%' }}>
           <View style={running ? styles.btnStop : styles.btnStart}>
             <Text style={styles.btnText}>
@@ -215,7 +212,6 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
 
-  // Permission
   permissionContainer: {
     flex: 1, backgroundColor: '#0a0a0a',
     justifyContent: 'center', alignItems: 'center', padding: 32
@@ -224,27 +220,34 @@ const styles = StyleSheet.create({
   permissionTitle: { color: '#fff', fontSize: 22, fontWeight: 'bold', marginBottom: 10 },
   permissionSub: { color: '#aaa', fontSize: 14, textAlign: 'center' },
 
-  // Camera
   camera: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
 
-  // Warning overlay
-  warningOverlay: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: '#ff0000', zIndex: 1
-  },
-
-  // Top bar
   topBar: {
     position: 'absolute', top: 0, left: 0, right: 0,
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.6)', paddingTop: 48, paddingBottom: 12,
+    backgroundColor: 'rgba(0,0,0,0.65)', paddingTop: 48, paddingBottom: 12,
     paddingHorizontal: 24, zIndex: 2
   },
   topBarTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  topBarRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+
+  torchBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    paddingVertical: 5, paddingHorizontal: 10,
+    borderRadius: 20, borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)'
+  },
+  torchBtnActive: {
+    backgroundColor: 'rgba(255,220,50,0.25)',
+    borderColor: 'rgba(255,220,50,0.6)'
+  },
+  torchIcon: { fontSize: 14 },
+  torchLabel: { color: '#fff', fontSize: 11, fontWeight: '600' },
+
   liveDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#555' },
   liveDotActive: { backgroundColor: '#4caf50' },
 
-  // Bottom overlay
   overlay: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     backgroundColor: 'rgba(0,0,0,0.85)',
@@ -253,7 +256,6 @@ const styles = StyleSheet.create({
     zIndex: 2
   },
 
-  // Status box
   statusBox: {
     backgroundColor: 'rgba(255,255,255,0.07)',
     borderRadius: 16, paddingVertical: 16, paddingHorizontal: 20,
@@ -262,14 +264,13 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)'
   },
   statusBoxWarning: {
-    backgroundColor: 'rgba(255,60,60,0.15)',
-    borderColor: 'rgba(255,60,60,0.4)'
+    backgroundColor: 'rgba(255,140,0,0.15)',
+    borderColor: 'rgba(255,140,0,0.4)'
   },
   statusIcon: { fontSize: 24, marginBottom: 8 },
   statusText: { color: '#4fc3f7', fontSize: 15, textAlign: 'center', lineHeight: 22 },
-  statusTextWarning: { color: '#ff6b6b', fontWeight: '700', fontSize: 16 },
+  statusTextWarning: { color: '#ffaa33', fontWeight: '700', fontSize: 16 },
 
-  // Buttons
   btnStart: {
     backgroundColor: '#01696f', paddingVertical: 18,
     borderRadius: 30, width: '100%', alignItems: 'center',

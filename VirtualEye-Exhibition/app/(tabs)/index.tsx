@@ -1,15 +1,16 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
+import { LightSensor } from 'expo-sensors';
 import { useRef, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  StatusBar, Animated
+  StatusBar, Animated, Platform
 } from 'react-native';
 
-const BACKEND = 'http://192.168.100.15:8000';
+// const BACKEND = 'http://192.168.100.15:8000';
+const BACKEND = 'http://192.168.43.160:8000';
 
-// Wait until speech is fully done
 const speakAndWait = (text: string, rate = 0.55, pitch = 1.0): Promise<void> => {
   return new Promise((resolve) => {
     Speech.stop();
@@ -19,13 +20,12 @@ const speakAndWait = (text: string, rate = 0.55, pitch = 1.0): Promise<void> => 
       pitch,
       volume: 1.0,
       onDone: () => resolve(),
-      onError: () => resolve(), // resolve even on error so loop continues
+      onError: () => resolve(),
       onStopped: () => resolve(),
     });
   });
 };
 
-// Small pause between detections (ms)
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 export default function HomeScreen() {
@@ -34,12 +34,14 @@ export default function HomeScreen() {
   const [running, setRunning] = useState(false);
   const [isWarning, setIsWarning] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
+  const [autoTorchEnabled, setAutoTorchEnabled] = useState(false); // shows 'AUTO' label
 
   const cameraRef = useRef<CameraView>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const runningRef = useRef(false); // track running state inside async loop
+  const runningRef = useRef(false);
+  const manualOverrideRef = useRef(false); // true = user manually toggled, skip auto
 
-  // Welcome message on launch
+  // Welcome message
   useEffect(() => {
     const timer = setTimeout(() => {
       speakAndWait('Welcome to Virtual Eye. Tap anywhere on the screen to start scanning your environment.');
@@ -47,7 +49,32 @@ export default function HomeScreen() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Pulse when running
+  // Auto torch via light sensor (Android only)
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    let sub: any;
+
+    const startSensor = async () => {
+      const isAvailable = await LightSensor.isAvailableAsync();
+      if (!isAvailable) return;
+
+      LightSensor.setUpdateInterval(2000); // check every 2 seconds
+
+      sub = LightSensor.addListener(({ illuminance }) => {
+        if (manualOverrideRef.current) return; // user manually set it, don't override
+
+        const isDark = illuminance < 15; // below 15 lux = dark
+        setAutoTorchEnabled(isDark);
+        setTorchOn(isDark);
+      });
+    };
+
+    startSensor();
+    return () => sub?.remove();
+  }, []);
+
+  // Pulse animation
   useEffect(() => {
     if (running) {
       Animated.loop(
@@ -78,19 +105,18 @@ export default function HomeScreen() {
         const res = await fetch(`${BACKEND}/detect`, { method: 'POST', body: formData });
         const { text, warning } = await res.json();
 
-        if (!runningRef.current) break; // stopped while waiting for response
+        if (!runningRef.current) break;
 
         setStatus(text);
         setIsWarning(warning);
 
         if (warning) {
           await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          await speakAndWait(text, 0.65, 0.95); // slightly faster for warnings
+          await speakAndWait(text, 0.65, 0.95);
         } else {
-          await speakAndWait(text, 0.55, 1.0); // calm and full speed
+          await speakAndWait(text, 0.55, 1.0);
         }
 
-        // Short pause after speech before next scan
         if (runningRef.current) await sleep(1500);
 
       } catch (e) {
@@ -99,7 +125,7 @@ export default function HomeScreen() {
         setStatus('❌ ' + errMsg);
         setIsWarning(false);
         await speakAndWait(errMsg);
-        await sleep(4000); // wait longer on error before retrying
+        await sleep(4000);
       }
     }
   };
@@ -127,9 +153,19 @@ export default function HomeScreen() {
   };
 
   const toggleTorch = () => {
+    // Mark as manual override — stops auto sensor from overriding
+    manualOverrideRef.current = true;
+    setAutoTorchEnabled(false);
+
     setTorchOn(prev => {
       const next = !prev;
       speakAndWait(next ? 'Flashlight on.' : 'Flashlight off.');
+
+      // After 10 seconds of manual mode, re-enable auto
+      setTimeout(() => {
+        manualOverrideRef.current = false;
+      }, 10000);
+
       return next;
     });
   };
@@ -169,13 +205,18 @@ export default function HomeScreen() {
       <View style={styles.topBar}>
         <Text style={styles.topBarTitle}>👁️ Virtual Eye</Text>
         <View style={styles.topBarRight}>
+
+          {/* Torch button — shows AUTO label when sensor is controlling it */}
           <TouchableOpacity
             onPress={(e) => { e.stopPropagation(); toggleTorch(); }}
             style={[styles.torchBtn, torchOn && styles.torchBtnActive]}
           >
             <Text style={styles.torchIcon}>🔦</Text>
-            <Text style={styles.torchLabel}>{torchOn ? 'ON' : 'OFF'}</Text>
+            <Text style={styles.torchLabel}>
+              {autoTorchEnabled ? 'AUTO' : torchOn ? 'ON' : 'OFF'}
+            </Text>
           </TouchableOpacity>
+
           <View style={[styles.liveDot, running && styles.liveDotActive]} />
         </View>
       </View>

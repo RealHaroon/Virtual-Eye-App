@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "VirtualEye",
-    "slug": "VirtualEye",
+    "name": "VirtualEye Exhibition",
+    "slug": "VirtualEye-Exhibition",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -19,7 +19,18 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.haroon1nonly.VirtualEyeExhibition",
+      "intentFilters": [
+        {
+          "action": "android.intent.action.MAIN",
+          "category": ["android.intent.category.LAUNCHER"]
+        },
+        {
+          "action": "android.intent.action.VOICE_COMMAND",
+          "category": ["android.intent.category.DEFAULT"]
+        }
+      ]
     },
     "web": {
       "output": "static",
@@ -43,6 +54,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "de2157ac-92c5-4573-8af4-aae19828d77e"
+      }
     }
   }
 }

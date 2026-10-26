@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 
 // const BACKEND = 'http://192.168.100.15:8000';
-const BACKEND = 'http://192.168.43.160:8000';
+const BACKEND = 'http://10.143.31.81:8000';
 
 const speakAndWait = (text: string, rate = 0.55, pitch = 1.0): Promise<void> => {
   return new Promise((resolve) => {

@@ -1,0 +1,12 @@
+services:
+  virtual-eye-backend:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      # cache downloaded EasyOCR models between container restarts
+      - easyocr-models:/root/.EasyOCR
+    restart: unless-stopped
+
+volumes:
+  easyocr-models:

@@ -44,14 +44,17 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 Or with Docker: `docker compose up --build`.
 YOLO weights and the OCR model download automatically on first run.
+Choose a model size with `YOLO_MODEL` (default `yolov8m.pt`; `yolov8s.pt` is faster on a CPU):
+`YOLO_MODEL=yolov8s.pt uvicorn main:app --host 0.0.0.0 --port 8000`
 
 ### 2. Point the app at your server
 
-Find your computer's local IP address (`ip a` / `ipconfig`) and set it in
-`mobile/app/index.tsx`:
+Find your computer's local IP address (`ip a` / `ipconfig`), then:
 
-```ts
-const BACKEND = 'http://<your-ip>:8000';
+```bash
+cd mobile
+cp .env.example .env.local
+# edit .env.local: EXPO_PUBLIC_BACKEND_URL=http://<your-ip>:8000
 ```
 
 The phone and the computer must be on the same Wi-Fi network.

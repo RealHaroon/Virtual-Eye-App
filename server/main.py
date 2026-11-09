@@ -1,3 +1,6 @@
+import os
+import random
+
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from ultralytics import YOLO
@@ -13,10 +16,10 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-# model = YOLO("yolov8n.pt")
-# model = YOLO("yolov8s.pt")
-model = YOLO("yolov8m.pt")
-# model = YOLO("yolov8l.pt")
+# Pick a model size with the YOLO_MODEL env var: yolov8n.pt (fastest),
+# yolov8s.pt, yolov8m.pt (default), yolov8l.pt (most accurate, slowest).
+# Weights download automatically on first run.
+model = YOLO(os.getenv("YOLO_MODEL", "yolov8m.pt"))
 
 
 ocr_reader = easyocr.Reader(['en'], gpu=False)  # downloads model on first run
@@ -39,12 +42,15 @@ INTRO_PHRASES = [
 ]
 
 OBSTACLE_PHRASES = [
-    "Be careful, there's a {label} very close {position}",
-    "Watch out, a {label} is right {position}",
-    "Caution, you're very close to a {label} {position}",
+    "Be careful, there's {thing} very close {position}",
+    "Watch out, {thing} is right {position}",
+    "Caution, you're very close to {thing} {position}",
 ]
 
-import random
+
+def with_article(label):
+    """'apple' -> 'an apple', 'chair' -> 'a chair'."""
+    return f"an {label}" if label[:1].lower() in "aeiou" else f"a {label}"
 
 def get_position(box, img_width):
     center_x = (box[0] + box[2]) / 2
@@ -76,7 +82,7 @@ def describe_scene(results, img):
             pos_key = get_position(box, img_width)
             pos_phrase = random.choice(POSITION_PHRASES[pos_key])
             template = random.choice(OBSTACLE_PHRASES)
-            text = template.format(label=label, position=pos_phrase)
+            text = template.format(thing=with_article(label), position=pos_phrase)
             return text, True
 
     # Build natural description
@@ -93,16 +99,12 @@ def describe_scene(results, img):
     if not seen:
         return "The path ahead looks clear.", False
 
-    items = list(seen.items())
+    parts = [f"{with_article(label)} {pos}" for label, pos in seen.items()]
     intro = random.choice(INTRO_PHRASES)
 
-    if len(items) == 1:
-        label, pos = items[0]
-        return f"{intro} a {label} {pos}.", False
-    elif len(items) == 2:
-        return f"{intro} a {items[0][0]} {items[0][1]}, and a {items[1][0]} {items[1][1]}.", False
-    else:
-        return f"{intro} a {items[0][0]} {items[0][1]}, a {items[1][0]} {items[1][1]}, and a {items[2][0]} {items[2][1]}.", False
+    if len(parts) == 1:
+        return f"{intro} {parts[0]}.", False
+    return f"{intro} {', '.join(parts[:-1])}, and {parts[-1]}.", False
 
 def read_text(img):
     small = cv2.resize(img, (640, 480))
@@ -110,13 +112,16 @@ def read_text(img):
     texts = [r[1] for r in results if r[2] > 0.5]
     if not texts:
         return None
-    combined = " ".join(texts[:4])
-    return f"I can read the following text: {combined}"
+    return " ".join(texts[:4])
 
+# Plain `def` (not async): FastAPI runs it in a worker thread, so slow
+# model inference doesn't block the server from accepting other requests.
 @app.post("/detect")
-async def detect(file: UploadFile = File(...)):
-    img_bytes = await file.read()
+def detect(file: UploadFile = File(...)):
+    img_bytes = file.file.read()
     img = cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        return {"text": "Sorry, I could not read that picture. Trying again.", "warning": False}
 
     # Run YOLO detection
     results = model(img, conf=0.25, imgsz=960)[0]

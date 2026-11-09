@@ -6,12 +6,15 @@ Point the phone's camera ahead: Virtual Eye detects objects, says **where** they
 
 ## Features
 
-- **Object detection** with YOLOv8, described in short phrases ("Chair on the left, near")
+- **Works offline**: YOLOv8 runs on the phone with TensorFlow Lite, no server needed
+- **Optional server mode** for a bigger model and text reading, with automatic fallback to
+  on-device detection when the server can't be reached
+- **Object detection** described in short phrases ("Chair on the left, near")
 - **Only speaks when something changes**: new objects, objects getting closer, or new text.
   Most important first: very close objects, then vehicles, people and animals, then obstacles.
   After a long silence it gives a short "Path clear" / "Still around you" update
 - **Obstacle warnings**: a large object close by triggers a haptic alert and an urgent voice warning
-- **Text reading (OCR)** with EasyOCR
+- **Text reading (OCR)** with EasyOCR (server mode)
 - **Tap anywhere** to start or stop, so you don't need to find a button
 - **Auto flashlight** that switches on in the dark using the light sensor (Android)
 - Speech-paced loop: the next frame is only captured after the current description finishes
@@ -19,12 +22,17 @@ Point the phone's camera ahead: Virtual Eye detects objects, says **where** they
 ## Architecture
 
 ```
-┌──────────────┐   JPEG frame (HTTP POST /detect)   ┌───────────────────────┐
-│  mobile/     │ ─────────────────────────────────▶ │  server/              │
-│  Expo app    │                                     │  FastAPI              │
-│  camera, TTS │ ◀───────────────────────────────── │  YOLOv8m + EasyOCR    │
-│  haptics     │   { text, warning }                 │                       │
-└──────────────┘                                     └───────────────────────┘
+            ┌─────────────────────── mobile/ (Expo app) ───────────────────────┐
+ camera ──▶ │ photo ─▶ on-device YOLOv8 (TFLite) ─┐                            │
+            │      └─▶ server (optional) ─────────┴─▶ announcer ─▶ speech,     │
+            │                                         (what changed?)  haptics │
+            └──────────────────────────────────────────────────────────────────┘
+                         │ HTTP POST /detect (only if EXPO_PUBLIC_BACKEND_URL is set)
+                         ▼
+            ┌──────────── server/ ────────────┐
+            │ FastAPI · YOLOv8m · EasyOCR      │
+            │ → { objects, ocr, text, warning }│
+            └──────────────────────────────────┘
 ```
 
 ## Project structure
@@ -36,7 +44,14 @@ Point the phone's camera ahead: Virtual Eye detects objects, says **where** they
 
 ## Getting started
 
-### 1. Run the server
+### 1. Add the on-device model
+
+Follow [`mobile/assets/models/README.md`](mobile/assets/models/README.md) to export
+`yolov8n.tflite` (about 12 MB, made in Google Colab; already included in this repo) and put it in `mobile/assets/models/`.
+
+### 2. (Optional) Run the server
+
+Only needed for text reading or a bigger model. Skip it to run fully on the phone.
 
 ```bash
 cd server
@@ -50,7 +65,7 @@ YOLO weights and the OCR model download automatically on first run.
 Choose a model size with `YOLO_MODEL` (default `yolov8m.pt`; `yolov8s.pt` is faster on a CPU):
 `YOLO_MODEL=yolov8s.pt uvicorn main:app --host 0.0.0.0 --port 8000`
 
-### 2. Point the app at your server
+Then point the app at it:
 
 Find your computer's local IP address (`ip a` / `ipconfig`), then:
 
@@ -62,18 +77,22 @@ cp .env.example .env.local
 
 The phone and the computer must be on the same Wi-Fi network.
 
-### 3. Run the app
+### 3. Build and run the app
+
+The app uses native modules (TensorFlow Lite), so it does **not** run in Expo Go.
+Build it with EAS (in the cloud, no large local downloads):
 
 ```bash
 cd mobile
 npm install
-npx expo start          # development
-eas build -p android --profile preview   # build an installable APK
+eas build -p android --profile preview       # installable APK
+# or, for live reloading while developing:
+eas build -p android --profile development   # install once, then: npx expo start --dev-client
 ```
 
 ## Roadmap
 
-- [ ] On-device detection (works offline, without a server)
+- [x] On-device detection (works offline, without a server)
 - [ ] Distance estimation
 - [x] Only announce changes in the scene, most important first
 - [ ] Currency recognition
@@ -83,7 +102,7 @@ eas build -p android --profile preview   # build an installable APK
 ## Tests
 
 ```bash
-cd mobile && npm test     # announcement logic (Node's built-in test runner)
+cd mobile && npm test     # announcer + YOLO decoding (Node's built-in test runner)
 ```
 
 ## License

@@ -9,21 +9,30 @@ import {
   StatusBar, Animated, Platform
 } from 'react-native';
 import { createAnnouncer, type Announcement, type DetectedObject } from '../lib/announcer';
+import { detectOnDevice, loadDetector } from '../lib/onDeviceDetector';
 
-// Set EXPO_PUBLIC_BACKEND_URL in mobile/.env.local (see .env.example).
-const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL ?? 'http://10.143.31.81:8000';
-const REQUEST_TIMEOUT_MS = 10000;
+// Detection runs on the phone by default. Optionally set EXPO_PUBLIC_BACKEND_URL
+// in mobile/.env.local (see .env.example) to use the server instead: a bigger
+// model plus text reading. If the server can't be reached, the app falls back
+// to on-device detection and tries the server again later.
+const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL || null;
+const REQUEST_TIMEOUT_MS = 5000;
+const SERVER_RETRY_MS = 30000;
 // Pause between frames. Shorter when nothing was said, so changes are caught quickly.
 const PAUSE_AFTER_SPEECH_MS = 800;
 const PAUSE_WHEN_QUIET_MS = 300;
 
-type DetectResult = {
+type ServerResult = {
   text: string;
   warning: boolean;
   // Sent by newer servers; older ones only send text/warning.
   objects?: DetectedObject[];
   ocr?: string | null;
 };
+
+type FrameAnalysis =
+  | { kind: 'objects'; objects: DetectedObject[]; ocr: string | null }
+  | { kind: 'legacy'; text: string; warning: boolean };
 
 const speakAndWait = (text: string, rate = 0.55, pitch = 1.0): Promise<void> => {
   return new Promise((resolve) => {
@@ -43,7 +52,7 @@ const speakAndWait = (text: string, rate = 0.55, pitch = 1.0): Promise<void> => 
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 // Sends one frame to the server. Throws on timeout or a non-2xx response.
-const detectFrame = async (uri: string): Promise<DetectResult> => {
+const detectOnServer = async (uri: string): Promise<ServerResult> => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
@@ -86,6 +95,16 @@ export default function HomeScreen() {
   const announcerRef = useRef(createAnnouncer());
   const manualOverrideRef = useRef(false); // true = user manually toggled, skip auto
   const manualTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // While the server is unreachable, skip it until this time (ms since epoch).
+  const serverRetryAtRef = useRef(0);
+  const usingServerRef = useRef(BACKEND !== null);
+
+  // Load the on-device model early so the first scan starts quickly.
+  useEffect(() => {
+    loadDetector().catch(() => {
+      // Reported when detection is actually attempted.
+    });
+  }, []);
 
   // Welcome message
   useEffect(() => {
@@ -152,6 +171,30 @@ export default function HomeScreen() {
     };
   }, [running, pulseAnim]);
 
+  // Server when configured and reachable, otherwise the phone. `notice` is set
+  // when switching between the two, so the user knows what changed.
+  const analyzeFrame = async (uri: string): Promise<{ analysis: FrameAnalysis; notice: string | null }> => {
+    if (BACKEND && Date.now() >= serverRetryAtRef.current) {
+      try {
+        const result = await detectOnServer(uri);
+        const notice = usingServerRef.current ? null : 'Connected to server.';
+        usingServerRef.current = true;
+        const analysis: FrameAnalysis = result.objects
+          ? { kind: 'objects', objects: result.objects, ocr: result.ocr ?? null }
+          : { kind: 'legacy', text: result.text, warning: result.warning };
+        return { analysis, notice };
+      } catch {
+        serverRetryAtRef.current = Date.now() + SERVER_RETRY_MS;
+      }
+    }
+    const notice = usingServerRef.current
+      ? 'Server not reachable. Using on-device detection. Text reading is paused.'
+      : null;
+    usingServerRef.current = false;
+    const objects = await detectOnDevice(uri);
+    return { analysis: { kind: 'objects', objects, ocr: null }, notice };
+  };
+
   const detectionLoop = async (loopId: number) => {
     const isActive = () => runningRef.current && loopIdRef.current === loopId;
 
@@ -168,18 +211,21 @@ export default function HomeScreen() {
           break;
         }
 
-        let result: DetectResult;
+        let frame: Awaited<ReturnType<typeof analyzeFrame>>;
         try {
-          result = await detectFrame(photo.uri);
+          frame = await analyzeFrame(photo.uri);
         } finally {
           deletePhoto(photo.uri);
         }
 
         if (!isActive()) break;
 
-        const announcement: Announcement = result.objects
-          ? announcerRef.current.update(result.objects, result.ocr ?? null)
-          : { speech: result.text, warning: result.warning, summary: result.text };
+        if (frame.notice) await speakAndWait(frame.notice);
+
+        const { analysis } = frame;
+        const announcement: Announcement = analysis.kind === 'objects'
+          ? announcerRef.current.update(analysis.objects, analysis.ocr)
+          : { speech: analysis.text, warning: analysis.warning, summary: analysis.text };
 
         setStatus(announcement.summary);
         setIsWarning(announcement.warning);
@@ -199,7 +245,7 @@ export default function HomeScreen() {
 
       } catch {
         if (!isActive()) break;
-        const errMsg = 'Cannot reach server. Please check your connection.';
+        const errMsg = 'Detection is not working right now. Trying again.';
         setStatus('❌ ' + errMsg);
         setIsWarning(false);
         await speakAndWait(errMsg);
@@ -211,6 +257,7 @@ export default function HomeScreen() {
   const startDetection = () => {
     const loopId = ++loopIdRef.current;
     announcerRef.current.reset();
+    serverRetryAtRef.current = 0; // give the server a fresh chance on every start
     runningRef.current = true;
     setRunning(true);
     setIsWarning(false);

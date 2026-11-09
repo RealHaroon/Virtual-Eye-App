@@ -61,6 +61,12 @@
             "usesCleartextTraffic": true
           }
         }
+      ],
+      [
+        "react-native-fast-tflite",
+        {
+          "enableAndroidGpuLibraries": true
+        }
       ]
     ],
     "experiments": {

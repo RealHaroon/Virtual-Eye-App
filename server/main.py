@@ -106,6 +106,26 @@ def describe_scene(results, img):
         return f"{intro} {parts[0]}.", False
     return f"{intro} {', '.join(parts[:-1])}, and {parts[-1]}.", False
 
+def list_objects(results, img):
+    """Structured detections for the app: label, position, share of the frame, confidence."""
+    img_height, img_width = img.shape[:2]
+    img_area = img_height * img_width
+    boxes = results.boxes.xyxy.cpu().numpy()
+    classes = results.boxes.cls.cpu().numpy()
+    confidences = results.boxes.conf.cpu().numpy()
+
+    objects = []
+    for box, cls, conf in zip(boxes, classes, confidences):
+        area = float((box[2] - box[0]) * (box[3] - box[1]) / img_area)
+        objects.append({
+            "label": model.names[int(cls)],
+            "position": get_position(box, img_width),
+            "area": round(area, 4),
+            "confidence": round(float(conf), 3),
+        })
+    return objects
+
+
 def read_text(img):
     small = cv2.resize(img, (640, 480))
     results = ocr_reader.readtext(small)
@@ -121,7 +141,8 @@ def detect(file: UploadFile = File(...)):
     img_bytes = file.file.read()
     img = cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
     if img is None:
-        return {"text": "Sorry, I could not read that picture. Trying again.", "warning": False}
+        return {"text": "Sorry, I could not read that picture. Trying again.", "warning": False,
+                "objects": [], "ocr": None}
 
     # Run YOLO detection
     results = model(img, conf=0.25, imgsz=960)[0]
@@ -141,4 +162,11 @@ def detect(file: UploadFile = File(...)):
         final_text = scene_text
 
     print(f"→ {final_text}")
-    return {"text": final_text, "warning": is_warning}
+    # `text`/`warning` serve older app builds; newer builds decide what to
+    # say themselves from `objects` and `ocr`.
+    return {
+        "text": final_text,
+        "warning": is_warning,
+        "objects": list_objects(results, img),
+        "ocr": ocr_text,
+    }

@@ -8,12 +8,22 @@ import {
   View, Text, StyleSheet, TouchableOpacity, Pressable,
   StatusBar, Animated, Platform
 } from 'react-native';
+import { createAnnouncer, type Announcement, type DetectedObject } from '../lib/announcer';
 
 // Set EXPO_PUBLIC_BACKEND_URL in mobile/.env.local (see .env.example).
 const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL ?? 'http://10.143.31.81:8000';
 const REQUEST_TIMEOUT_MS = 10000;
+// Pause between frames. Shorter when nothing was said, so changes are caught quickly.
+const PAUSE_AFTER_SPEECH_MS = 800;
+const PAUSE_WHEN_QUIET_MS = 300;
 
-type DetectResult = { text: string; warning: boolean };
+type DetectResult = {
+  text: string;
+  warning: boolean;
+  // Sent by newer servers; older ones only send text/warning.
+  objects?: DetectedObject[];
+  ocr?: string | null;
+};
 
 const speakAndWait = (text: string, rate = 0.55, pitch = 1.0): Promise<void> => {
   return new Promise((resolve) => {
@@ -72,6 +82,8 @@ export default function HomeScreen() {
   const runningRef = useRef(false);
   // Each detection loop gets an id; a loop stops as soon as a newer one starts.
   const loopIdRef = useRef(0);
+  // Remembers what was already said, so only changes are announced.
+  const announcerRef = useRef(createAnnouncer());
   const manualOverrideRef = useRef(false); // true = user manually toggled, skip auto
   const manualTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -165,17 +177,25 @@ export default function HomeScreen() {
 
         if (!isActive()) break;
 
-        setStatus(result.text);
-        setIsWarning(result.warning);
+        const announcement: Announcement = result.objects
+          ? announcerRef.current.update(result.objects, result.ocr ?? null)
+          : { speech: result.text, warning: result.warning, summary: result.text };
 
-        if (result.warning) {
-          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          await speakAndWait(result.text, 0.65, 0.95);
-        } else {
-          await speakAndWait(result.text, 0.55, 1.0);
+        setStatus(announcement.summary);
+        setIsWarning(announcement.warning);
+
+        if (announcement.speech) {
+          if (announcement.warning) {
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            await speakAndWait(announcement.speech, 0.65, 0.95);
+          } else {
+            await speakAndWait(announcement.speech, 0.55, 1.0);
+          }
         }
 
-        if (isActive()) await sleep(1500);
+        if (isActive()) {
+          await sleep(announcement.speech ? PAUSE_AFTER_SPEECH_MS : PAUSE_WHEN_QUIET_MS);
+        }
 
       } catch {
         if (!isActive()) break;
@@ -190,6 +210,7 @@ export default function HomeScreen() {
 
   const startDetection = () => {
     const loopId = ++loopIdRef.current;
+    announcerRef.current.reset();
     runningRef.current = true;
     setRunning(true);
     setIsWarning(false);

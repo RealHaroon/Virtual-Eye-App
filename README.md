@@ -6,7 +6,10 @@ Point the phone's camera ahead: Virtual Eye detects objects, says **where** they
 
 ## Features
 
-- **Object detection** with YOLOv8, described in natural speech ("I notice a chair on your left")
+- **Object detection** with YOLOv8, described in short phrases ("Chair on the left, near")
+- **Only speaks when something changes**: new objects, objects getting closer, or new text.
+  Most important first: very close objects, then vehicles, people and animals, then obstacles.
+  After a long silence it gives a short "Path clear" / "Still around you" update
 - **Obstacle warnings**: a large object close by triggers a haptic alert and an urgent voice warning
 - **Text reading (OCR)** with EasyOCR
 - **Tap anywhere** to start or stop, so you don't need to find a button
@@ -72,10 +75,16 @@ eas build -p android --profile preview   # build an installable APK
 
 - [ ] On-device detection (works offline, without a server)
 - [ ] Distance estimation
-- [ ] Only announce changes in the scene, most important first
+- [x] Only announce changes in the scene, most important first
 - [ ] Currency recognition
 - [ ] Urdu voice output
 - [ ] Voice commands and an SOS gesture
+
+## Tests
+
+```bash
+cd mobile && npm test     # announcement logic (Node's built-in test runner)
+```
 
 ## License
 

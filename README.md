@@ -25,6 +25,7 @@ Point the phone's camera ahead: Virtual Eye detects objects, says **where** they
 - **English and Urdu** voice (اردو), chosen in Settings
 - **Settings**: language, speech speed and how much to say (quiet / normal / detailed)
 - **Spoken tutorial** on first launch, replayable from Settings
+- **Battery saver**: scanning pauses while the phone lies face down and resumes when picked up
 - **Tap anywhere** to start or stop, so you don't need to find a button
 - **Auto flashlight** that switches on in the dark using the light sensor (Android)
 - Speech-paced loop: the next frame is only captured after the current description finishes

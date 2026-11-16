@@ -1,6 +1,6 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
-import { LightSensor } from 'expo-sensors';
+import { Accelerometer, LightSensor } from 'expo-sensors';
 import { File } from 'expo-file-system';
 import { useRef, useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
@@ -10,6 +10,7 @@ import {
 import {
   CLOSE_AREA, createAnnouncer, describeScene, VERBOSITY_OPTIONS, type Announcement, type DetectedObject,
 } from '../lib/announcer';
+import { createFaceDownTracker } from '../lib/battery';
 import { dominantColours, meanLuminance } from '../lib/colour';
 import { cycle } from '../lib/gestures';
 import {
@@ -85,6 +86,7 @@ export default function HomeScreen() {
   const describeRequestedRef = useRef(false); // double-tap while scanning
   const busyRef = useRef(false); // a one-shot look (colour, light, describe) is running
   const luxRef = useRef<number | null>(null); // latest light-sensor reading
+  const pausedRef = useRef(false); // battery saver: phone is face down
 
   /** Speaks and remembers the message for "repeat". */
   const say = (text: string, urgent = false) => {
@@ -153,6 +155,35 @@ export default function HomeScreen() {
     };
   }, []);
 
+  // Battery saver: while scanning, pause when the phone lies face down and
+  // resume when it is picked up. The accelerometer only runs while scanning.
+  useEffect(() => {
+    if (!running) return;
+    let sub: { remove: () => void } | undefined;
+    let cancelled = false;
+    const tracker = createFaceDownTracker(Platform.OS);
+
+    Accelerometer.isAvailableAsync().then(available => {
+      if (!available || cancelled) return;
+      Accelerometer.setUpdateInterval(500);
+      sub = Accelerometer.addListener(({ z }) => {
+        const action = tracker.update(z, Date.now());
+        if (!action) return;
+        pausedRef.current = action === 'pause';
+        const text = msg(action === 'pause' ? 'pausedFaceDown' : 'resumed', getSettings().language);
+        setStatus(action === 'pause' ? text : '…');
+        lastSpokenRef.current = text;
+        speak(text);
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      sub?.remove();
+      pausedRef.current = false;
+    };
+  }, [running]);
+
   // Pulse animation
   useEffect(() => {
     if (!running) return;
@@ -208,6 +239,10 @@ export default function HomeScreen() {
     await say(msg(reading ? 'readingStarted' : 'detectionStarted', lang()));
 
     while (isActive()) {
+      if (pausedRef.current) {
+        await sleep(500); // battery saver: no photos while face down
+        continue;
+      }
       try {
         const photo = await takePhoto();
         if (!photo) break;

@@ -142,6 +142,8 @@ const MESSAGES = {
     speechSpeed: (speed: string) => `Speech speed ${speed}.`,
     verbosity: (level: string) => `${level} mode.`,
     languageChanged: 'Language: English.',
+    pausedFaceDown: 'Paused. The phone is face down. Pick it up to continue.',
+    resumed: 'Resumed.',
   },
   ur: {
     welcome: 'ورچوئل آئی میں خوش آمدید۔ شروع کرنے کے لیے کہیں بھی ٹیپ کریں۔ موڈ بدلنے کے لیے دائیں یا بائیں سوائپ کریں۔',
@@ -159,6 +161,8 @@ const MESSAGES = {
     speechSpeed: (speed: string) => `بولنے کی رفتار: ${({ slow: 'آہستہ', normal: 'عام', fast: 'تیز' } as Record<string, string>)[speed] ?? speed}۔`,
     verbosity: (level: string) => `${({ quiet: 'خاموش', normal: 'عام', detailed: 'تفصیلی' } as Record<string, string>)[level] ?? level} موڈ۔`,
     languageChanged: 'زبان: اردو۔',
+    pausedFaceDown: 'رک گیا۔ فون الٹا رکھا ہے۔ جاری رکھنے کے لیے اٹھائیں۔',
+    resumed: 'دوبارہ شروع۔',
   },
 } satisfies Record<Language, Record<string, string | ((arg: string) => string)>>;
 

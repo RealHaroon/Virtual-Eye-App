@@ -4,6 +4,7 @@ import { dominantColours, meanLuminance, nameColour } from './colour.ts';
 import { classifyTouch, cycle } from './gestures.ts';
 import { colourWords } from './i18n.ts';
 import { lightLevel } from './light.ts';
+import { createFaceDownTracker, faceDownState } from './battery.ts';
 
 const name = (r: number, g: number, b: number) => colourWords(nameColour(r, g, b), 'en');
 
@@ -53,4 +54,22 @@ test('swiping cycles through modes and wraps around', () => {
   assert.equal(cycle(modes, 'scan', 'swipeLeft'), 'read');
   assert.equal(cycle(modes, 'light', 'swipeLeft'), 'scan');
   assert.equal(cycle(modes, 'scan', 'swipeRight'), 'light');
+});
+
+test('pauses after 2 s face down and resumes when picked up', () => {
+  const t = createFaceDownTracker('android');
+  assert.equal(t.update(1.0, 0), null);       // face up on Android
+  assert.equal(t.update(-0.98, 100), null);   // turned over
+  assert.equal(t.update(-0.97, 1500), null);  // not long enough yet
+  assert.equal(t.update(-0.99, 2200), 'pause');
+  assert.equal(t.update(-0.7, 2500), null);   // still mostly down (hysteresis)
+  assert.equal(t.update(0.2, 3000), 'resume');
+});
+
+test('a quick flip does not pause, and iOS axis is reversed', () => {
+  const t = createFaceDownTracker('android');
+  t.update(-0.95, 0);
+  assert.equal(t.update(0.9, 800), null);
+  assert.equal(faceDownState(0.95, 'ios', false), true);
+  assert.equal(faceDownState(-0.95, 'ios', false), false);
 });

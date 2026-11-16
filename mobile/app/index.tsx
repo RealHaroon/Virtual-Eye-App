@@ -10,15 +10,16 @@ import {
   StatusBar, Animated, Platform
 } from 'react-native';
 import {
-  createAnnouncer, describeScene, VERBOSITY_OPTIONS, type Announcement, type DetectedObject,
+  CLOSE_AREA, createAnnouncer, describeScene, VERBOSITY_OPTIONS, type Announcement, type DetectedObject,
 } from '../lib/announcer';
+import { readTextOnDevice } from '../lib/onDeviceOcr';
 import { getSettings, SPEECH_RATES } from '../lib/settings';
 import { detectOnDevice, loadDetector } from '../lib/onDeviceDetector';
 
 // Detection runs on the phone by default. Optionally set EXPO_PUBLIC_BACKEND_URL
 // in mobile/.env.local (see .env.example) to use the server instead: a bigger
-// model plus text reading. If the server can't be reached, the app falls back
-// to on-device detection and tries the server again later.
+// model and EasyOCR. If the server can't be reached, the app falls back to
+// on-device detection and text reading, and tries the server again later.
 const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL || null;
 const REQUEST_TIMEOUT_MS = 5000;
 const SERVER_RETRY_MS = 30000;
@@ -213,11 +214,14 @@ export default function HomeScreen() {
       }
     }
     const notice = usingServerRef.current
-      ? 'Server not reachable. Using on-device detection. Text reading is paused.'
+      ? 'Server not reachable. Using on-device detection.'
       : null;
     usingServerRef.current = false;
     const objects = await detectOnDevice(uri);
-    return { analysis: { kind: 'objects', objects, ocr: null }, notice };
+    // Like the server: skip text while something is very close, so warnings come first.
+    const somethingClose = objects.some(obj => obj.area >= CLOSE_AREA);
+    const ocr = somethingClose ? null : await readTextOnDevice(uri);
+    return { analysis: { kind: 'objects', objects, ocr }, notice };
   };
 
   const detectionLoop = async (loopId: number) => {

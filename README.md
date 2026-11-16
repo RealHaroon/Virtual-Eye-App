@@ -9,14 +9,17 @@ Point the phone's camera ahead: Virtual Eye detects objects, says **where** they
 ## Features
 
 - **Works offline**: YOLOv8 runs on the phone with TensorFlow Lite, no server needed
-- **Optional server mode** for a bigger model and text reading, with automatic fallback to
+- **Optional server mode** for a bigger model, with automatic fallback to
   on-device detection when the server can't be reached
 - **Object detection** described in short phrases ("Chair on the left, near")
 - **Only speaks when something changes**: new objects, objects getting closer, or new text.
   Most important first: very close objects, then vehicles, people and animals, then obstacles.
   After a long silence it gives a short "Path clear" / "Still around you" update
 - **Obstacle warnings**: a large object close by triggers a haptic alert and an urgent voice warning
-- **Text reading (OCR)** with EasyOCR (server mode)
+- **Text reading (OCR)** on the phone with Google ML Kit (EasyOCR in server mode)
+- **Gestures**: tap to start/stop, double-tap to describe everything in view, long-press to
+  repeat the last message (also in TalkBack's actions menu)
+- **Settings**: speech speed and how much to say (quiet / normal / detailed)
 - **Tap anywhere** to start or stop, so you don't need to find a button
 - **Auto flashlight** that switches on in the dark using the light sensor (Android)
 - Speech-paced loop: the next frame is only captured after the current description finishes

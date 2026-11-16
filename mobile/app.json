@@ -63,7 +63,8 @@
         {
           "enableAndroidGpuLibraries": true
         }
-      ]
+      ],
+      "./plugins/withMlKitOcrModel"
     ],
     "experiments": {
       "typedRoutes": true,

@@ -1,5 +1,7 @@
 # 👁️ Virtual Eye
 
+[![CI](https://github.com/RealHaroon/Virtual-Eye-App/actions/workflows/ci.yml/badge.svg)](https://github.com/RealHaroon/Virtual-Eye-App/actions/workflows/ci.yml)
+
 An AI assistant that helps blind and visually impaired people understand their surroundings.
 Point the phone's camera ahead: Virtual Eye detects objects, says **where** they are
 (left / ahead / right), warns about **close obstacles** with vibration, and **reads text** aloud.

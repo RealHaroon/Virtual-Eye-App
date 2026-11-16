@@ -204,7 +204,8 @@ export default function HomeScreen() {
       try {
         if (!cameraRef.current) break;
 
-        const photo = await cameraRef.current.takePictureAsync({ quality: 0.4 });
+        // No click and no screen flash: a frame is taken about every second.
+        const photo = await cameraRef.current.takePictureAsync({ quality: 0.4, shutterSound: false });
         if (!photo) break;
         if (!isActive()) {
           deletePhoto(photo.uri);
@@ -324,6 +325,7 @@ export default function HomeScreen() {
         style={styles.camera}
         facing="back"
         enableTorch={torchOn}
+        animateShutter={false}
       />
 
       {/* Full-screen tap target. Panels above pass touches through to it,

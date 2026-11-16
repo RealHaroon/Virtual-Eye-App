@@ -1,8 +1,10 @@
-import * as Speech from 'expo-speech';
+import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { Verbosity } from '../lib/announcer';
-import { SPEECH_RATES, updateSettings, useSettings, type SpeechSpeed } from '../lib/settings';
+import { msg, msgWith, TUTORIAL, type Language } from '../lib/i18n';
+import { updateSettings, useSettings, type SpeechSpeed } from '../lib/settings';
+import { hasVoiceFor, speak } from '../lib/speech';
 
 type Option<T extends string> = { value: T; label: string; description: string };
 
@@ -18,10 +20,14 @@ const VERBOSITY_OPTIONS: Option<Verbosity>[] = [
   { value: 'detailed', label: 'Detailed', description: 'More objects, more often' },
 ];
 
-const say = (text: string, speed: SpeechSpeed) => {
-  Speech.stop();
-  Speech.speak(text, { language: 'en-US', rate: SPEECH_RATES[speed] });
-};
+const LANGUAGE_OPTIONS: Option<Language>[] = [
+  { value: 'en', label: 'English', description: 'English voice' },
+  { value: 'ur', label: 'اردو  (Urdu)', description: 'Needs an Urdu text-to-speech voice on the phone' },
+];
+
+const NO_URDU_VOICE =
+  'Urdu voice is not installed on this phone. Open phone Settings, then Text-to-speech, ' +
+  'then Google, and install Urdu voice data.';
 
 function OptionGroup<T extends string>({ title, options, selected, onSelect }: {
   title: string;
@@ -58,6 +64,21 @@ function OptionGroup<T extends string>({ title, options, selected, onSelect }: {
 export default function SettingsScreen() {
   const router = useRouter();
   const settings = useSettings();
+  const [urduVoiceMissing, setUrduVoiceMissing] = useState(false);
+
+  const chooseLanguage = async (language: Language) => {
+    updateSettings({ language });
+    if (language === 'ur' && !(await hasVoiceFor('ur'))) {
+      setUrduVoiceMissing(true);
+      // Said in English on purpose: without an Urdu voice, Urdu text can't be spoken.
+      updateSettings({ language: 'en' });
+      await speak(NO_URDU_VOICE);
+      updateSettings({ language: 'ur' });
+      return;
+    }
+    setUrduVoiceMissing(false);
+    speak(msg('languageChanged', language));
+  };
 
   return (
     <View style={styles.container}>
@@ -80,7 +101,7 @@ export default function SettingsScreen() {
           selected={settings.speechSpeed}
           onSelect={speechSpeed => {
             updateSettings({ speechSpeed });
-            say(`Speech speed ${speechSpeed}.`, speechSpeed);
+            speak(msgWith('speechSpeed', speechSpeed, settings.language));
           }}
         />
 
@@ -90,15 +111,36 @@ export default function SettingsScreen() {
           selected={settings.verbosity}
           onSelect={verbosity => {
             updateSettings({ verbosity });
-            say(`${verbosity} mode.`, settings.speechSpeed);
+            speak(msgWith('verbosity', verbosity, settings.language));
           }}
         />
+
+        <OptionGroup
+          title="Language"
+          options={LANGUAGE_OPTIONS}
+          selected={settings.language}
+          onSelect={chooseLanguage}
+        />
+        {urduVoiceMissing && (
+          <Text style={styles.warning} accessibilityLiveRegion="polite">{NO_URDU_VOICE}</Text>
+        )}
+
+        <TouchableOpacity
+          style={styles.tutorialBtn}
+          onPress={() => speak(TUTORIAL[settings.language])}
+          accessibilityRole="button"
+          accessibilityLabel="Play the tutorial"
+          accessibilityHint="Explains the gestures and modes out loud"
+        >
+          <Text style={styles.tutorialText}>▶  Play the tutorial</Text>
+        </TouchableOpacity>
 
         <View style={styles.group}>
           <Text style={styles.groupTitle} accessibilityRole="header">Gestures on the camera screen</Text>
           <Text style={styles.help}>• Tap: start or stop scanning</Text>
           <Text style={styles.help}>• Double-tap: describe everything in view now</Text>
           <Text style={styles.help}>• Long-press: repeat the last message</Text>
+          <Text style={styles.help}>• Swipe left or right: change mode (Scan, Read text, Colour, Light)</Text>
           <Text style={styles.help}>
             With TalkBack on, use the actions menu for “Describe now” and “Repeat”.
           </Text>
@@ -136,4 +178,13 @@ const styles = StyleSheet.create({
   optionLabel: { color: '#fff', fontSize: 17, fontWeight: '600' },
   optionDescription: { color: '#9aa4b2', fontSize: 13, marginTop: 2 },
   help: { color: '#c9d1d9', fontSize: 15, lineHeight: 22 },
+  warning: {
+    color: '#ffaa33', fontSize: 14, lineHeight: 20, marginTop: -16,
+    padding: 12, borderRadius: 10, backgroundColor: 'rgba(255,140,0,0.12)',
+  },
+  tutorialBtn: {
+    paddingVertical: 16, borderRadius: 14, alignItems: 'center',
+    borderWidth: 1, borderColor: '#2EC4B6', backgroundColor: 'rgba(46,196,182,0.10)',
+  },
+  tutorialText: { color: '#2EC4B6', fontSize: 17, fontWeight: '700' },
 });

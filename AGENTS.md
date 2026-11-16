@@ -16,11 +16,19 @@ Owner: RealHaroon (GitHub). Expo account: `haroon1nonly`.
 
 ```
 mobile/                      Expo SDK 54, React Native 0.81, New Architecture, expo-router
-  app/index.tsx              Camera screen: detection loop, gestures, torch, speech
-  app/settings.tsx           Settings (speech speed, verbosity); spoken feedback
+  app/index.tsx              Camera screen: modes, detection loop, one-shot looks, torch
+  app/settings.tsx           Settings (language, speech speed, verbosity, tutorial)
   lib/announcer.ts           What to say each frame (only changes, priority order) [pure]
   lib/yolo.ts                YOLOv8 tensor decoding, NMS, input tensor layout     [pure]
   lib/ocrText.ts             Cleans raw OCR lines before speaking                  [pure]
+  lib/i18n.ts                Every spoken phrase in English and Urdu               [pure]
+  lib/colour.ts              Names colours from pixels (Colour mode)               [pure]
+  lib/light.ts               Brightness level from lux or image (Light mode)       [pure]
+  lib/gestures.ts            Tap/swipe classification, mode cycling                [pure]
+  lib/useScreenGestures.ts   PanResponder: tap, double-tap, long-press, swipe
+  lib/imagePixels.ts         Photo -> crop/resize -> RGB bytes (expo-image-manipulator + jpeg-js)
+  lib/speech.ts              expo-speech in the chosen language/speed; Urdu voice check
+  lib/serverDetector.ts      Optional server mode (EXPO_PUBLIC_BACKEND_URL)
   lib/onDeviceDetector.ts    TFLite pipeline: resize -> JPEG decode -> model -> yolo.ts
   lib/onDeviceOcr.ts         ML Kit text recognition (expo-text-extractor)
   lib/settings.ts            Settings store, saved to settings.json via expo-file-system
@@ -64,6 +72,9 @@ The app does **not** run in Expo Go (native TFLite and ML Kit modules).
 - **Server mode**: only when `EXPO_PUBLIC_BACKEND_URL` is set in `mobile/.env.local`.
   If unreachable, the app falls back to on-device for 30 s, then retries.
   The server response keeps `text`/`warning` for old app builds plus `objects`/`ocr`.
+- **Every spoken string goes through `lib/i18n.ts`** (English + Urdu). Visual UI labels
+  are English for now. Urdu needs an Urdu TTS voice on the phone; Settings checks and
+  explains how to install it.
 - **Accessibility is the product.** Every control needs `accessibilityRole`/`Label`.
   The full-screen `Pressable` handles tap / double-tap / long-press and exposes the same
   as TalkBack `accessibilityActions`. Test with TalkBack on.
@@ -93,12 +104,12 @@ The app does **not** run in Expo Go (native TFLite and ML Kit modules).
 ## Roadmap (most useful first)
 
 Done: on-device detection, change-only speech, gestures, settings, on-device OCR,
-new icon, CI.
+new icon, CI, Urdu voice, modes (Scan / Read text / Colour / Light), spoken tutorial.
 
 1. **Test on a real phone** and tune `lib/announcer.ts` numbers (`heartbeatMs`,
    `warningRepeatMs`, `CLOSE_AREA`/`NEAR_AREA`) from real use.
-2. **Urdu voice**: `expo-speech` with `ur-PK` where available, translated phrases
-   (keep phrase building in `announcer.ts`; add a language setting).
+2. **Urdu UI and OCR**: visual labels are still English; ML Kit's Latin model can't
+   read Urdu script (needs a different OCR model).
 3. **PKR currency recognition**: needs a small custom detection model trained on photos
    of Pakistani notes (e.g. YOLO trained in Colab), run alongside the COCO model.
 4. **SOS**: long-press is taken (repeat). Use a shake or a settings-configured contact;

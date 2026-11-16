@@ -4,9 +4,7 @@
 // pixels -> run the model -> decode boxes (lib/yolo.ts).
 
 import { loadTensorflowModel, type TfliteModel } from 'react-native-fast-tflite';
-import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
-import { File } from 'expo-file-system';
-import * as jpeg from 'jpeg-js';
+import { loadRgb } from './imagePixels';
 import { decodeYolo, inputLayoutOf, toDetectedObject, toInputTensor } from './yolo';
 import type { DetectedObject } from './announcer';
 
@@ -29,40 +27,18 @@ export function loadDetector(): Promise<TfliteModel> {
   return modelPromise;
 }
 
-function base64ToBytes(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-
 export async function detectOnDevice(photoUri: string): Promise<DetectedObject[]> {
   const model = await loadDetector();
   const input = inputLayoutOf(model.inputs[0].shape); // [1, 3, H, W] or [1, H, W, 3]
   const { width, height } = input;
 
-  // Giving both width and height stretches the photo to the model's square input.
-  // Box positions and sizes then come out as fractions of the original frame.
-  const resized = await manipulateAsync(
-    photoUri,
-    [{ resize: { width, height } }],
-    { format: SaveFormat.JPEG, compress: 0.9, base64: true },
-  );
-  try {
-    if (!resized.base64) throw new Error('Image resize returned no data');
-    const { data } = jpeg.decode(base64ToBytes(resized.base64), { useTArray: true, formatAsRGBA: false });
-
-    const [output] = await model.run([toInputTensor(data, input, model.inputs[0].dataType)]);
-    const detections = decodeYolo(new Float32Array(output), {
-      shape: model.outputs[0].shape,
-      inputSize: width,
-    });
-    return detections.map(toDetectedObject);
-  } finally {
-    try {
-      new File(resized.uri).delete();
-    } catch {
-      // cache file already gone
-    }
-  }
+  // Stretching the photo to the model's square input keeps box positions and
+  // sizes as fractions of the original frame.
+  const rgb = await loadRgb(photoUri, width, height);
+  const [output] = await model.run([toInputTensor(rgb, input, model.inputs[0].dataType)]);
+  const detections = decodeYolo(new Float32Array(output), {
+    shape: model.outputs[0].shape,
+    inputSize: width,
+  });
+  return detections.map(toDetectedObject);
 }

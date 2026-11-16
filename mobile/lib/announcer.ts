@@ -12,6 +12,8 @@
 // Pure logic with no React Native imports, so it works the same whether
 // detection runs on the server or on the phone.
 
+import { objectPhrase, SCENE, type Language } from './i18n.ts';
+
 export type Position = 'left' | 'center' | 'right';
 export type Proximity = 'far' | 'near' | 'close';
 
@@ -45,6 +47,7 @@ export type AnnouncerOptions = {
   minConfidence: number;
   /** Don't announce objects farther than this ('near' = only near or very close). */
   minProximity: Proximity;
+  language: Language;
 };
 
 export const DEFAULT_OPTIONS: AnnouncerOptions = {
@@ -54,6 +57,7 @@ export const DEFAULT_OPTIONS: AnnouncerOptions = {
   maxItems: 3,
   minConfidence: 0.35,
   minProximity: 'far',
+  language: 'en',
 };
 
 /** How much the app talks. Chosen in Settings. */
@@ -117,33 +121,15 @@ function groupByLabel(objects: DetectedObject[], minConfidence: number): SceneIt
   return [...byLabel.values()].sort((a, b) => priorityOf(b) - priorityOf(a));
 }
 
-function plural(label: string): string {
-  if (label === 'person') return 'people';
-  if (/(s|sh|ch|x)$/.test(label)) return `${label}es`;
-  return `${label}s`;
-}
-
-const POSITION_WORDS: Record<Position, string> = {
-  left: 'on the left',
-  center: 'ahead',
-  right: 'on the right',
-};
-
-/**
- * Short phrase, e.g. "Car ahead, very close", "2 people on the left", or,
- * when a group is spread out, "3 people, nearest on the right, near".
- * Distance always describes the nearest one.
- */
-export function phrase(item: SceneItem): string {
-  const proximity = proximityOf(item.area);
-  const distance = proximity === 'close' ? ', very close' : proximity === 'near' ? ', near' : '';
-  const where = POSITION_WORDS[item.position];
-  let text: string;
-  if (item.count === 1) text = `${item.label} ${where}`;
-  else if (item.positions.size === 1) text = `${item.count} ${plural(item.label)} ${where}`;
-  else text = `${item.count} ${plural(item.label)}, nearest ${where}`;
-  text += distance;
-  return text.charAt(0).toUpperCase() + text.slice(1);
+/** Short phrase for one kind of object, e.g. "Car ahead, very close" (see i18n.ts). */
+export function phrase(item: SceneItem, language: Language = 'en'): string {
+  return objectPhrase({
+    label: item.label,
+    count: item.count,
+    spread: item.positions.size > 1,
+    position: item.position,
+    proximity: proximityOf(item.area),
+  }, language);
 }
 
 /**
@@ -153,13 +139,14 @@ export function phrase(item: SceneItem): string {
 export function describeScene(
   objects: DetectedObject[],
   ocrText: string | null,
-  { maxItems = 5, minConfidence = DEFAULT_OPTIONS.minConfidence } = {},
+  { maxItems = 5, minConfidence = DEFAULT_OPTIONS.minConfidence, language = 'en' as Language } = {},
 ): string {
-  const parts = groupByLabel(objects, minConfidence).slice(0, maxItems).map(phrase);
+  const words = SCENE[language];
+  const parts = groupByLabel(objects, minConfidence).slice(0, maxItems).map(item => phrase(item, language));
   const ocr = ocrText?.trim();
-  if (ocr) parts.push(`Text: ${ocr}`);
-  if (parts.length === 0) return 'Nothing detected. The path looks clear.';
-  return parts.join('. ') + '.';
+  if (ocr) parts.push(words.text(ocr));
+  if (parts.length === 0) return words.nothingDetected;
+  return words.sentences(parts);
 }
 
 const normalizeText = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -173,6 +160,8 @@ type Memory = {
 
 export function createAnnouncer(overrides: Partial<AnnouncerOptions> = {}) {
   const opts: AnnouncerOptions = { ...DEFAULT_OPTIONS, ...overrides };
+  const words = SCENE[opts.language];
+  const say = (item: SceneItem) => phrase(item, opts.language);
   const memory = new Map<string, Memory>();
   let lastOcr: string | null = null;
   let lastSpokenAt = -Infinity;
@@ -214,24 +203,24 @@ export function createAnnouncer(overrides: Partial<AnnouncerOptions> = {}) {
 
     const toSay = news.slice(0, opts.maxItems);
     const warning = toSay.some(item => proximityOf(item.area) === 'close');
-    const parts = toSay.map(phrase);
+    const parts = toSay.map(say);
 
     const ocr = ocrText?.trim() || null;
     if (ocr && normalizeText(ocr) !== lastOcr) {
-      parts.push(`Text: ${ocr}`);
+      parts.push(words.text(ocr));
       lastOcr = normalizeText(ocr);
     }
 
     // Heartbeat: after a long silence, briefly say what's still around.
     if (parts.length === 0 && now - lastSpokenAt >= opts.heartbeatMs) {
       parts.push(scene.length === 0
-        ? 'Path clear'
-        : `Still around you: ${scene.slice(0, 2).map(phrase).join(', ').toLowerCase()}`);
+        ? words.pathClear
+        : words.stillAround(scene.slice(0, 2).map(say)));
     }
 
     let speech: string | null = null;
     if (parts.length > 0) {
-      speech = (warning ? 'Careful! ' : '') + parts.join('. ') + '.';
+      speech = (warning ? words.careful : '') + words.sentences(parts);
       lastSpokenAt = now;
       for (const item of toSay) {
         const mem = memory.get(item.label);
@@ -239,9 +228,9 @@ export function createAnnouncer(overrides: Partial<AnnouncerOptions> = {}) {
       }
     }
 
-    const summaryParts = scene.slice(0, opts.maxItems).map(phrase);
-    if (ocr) summaryParts.push(`Text: ${ocr}`);
-    const summary = summaryParts.length > 0 ? summaryParts.join('\n') : 'Path clear';
+    const summaryParts = scene.slice(0, opts.maxItems).map(say);
+    if (ocr) summaryParts.push(words.text(ocr));
+    const summary = summaryParts.length > 0 ? summaryParts.join('\n') : words.pathClear;
 
     return { speech, warning, summary };
   }

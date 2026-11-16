@@ -17,9 +17,14 @@ Point the phone's camera ahead: Virtual Eye detects objects, says **where** they
   After a long silence it gives a short "Path clear" / "Still around you" update
 - **Obstacle warnings**: a large object close by triggers a haptic alert and an urgent voice warning
 - **Text reading (OCR)** on the phone with Google ML Kit (EasyOCR in server mode)
-- **Gestures**: tap to start/stop, double-tap to describe everything in view, long-press to
-  repeat the last message (also in TalkBack's actions menu)
-- **Settings**: speech speed and how much to say (quiet / normal / detailed)
+- **Four modes**, switched by swiping left/right:
+  **Scan** (objects and warnings), **Read text**, **Colour** (what colour is this?) and
+  **Light** (are the lights on?)
+- **Gestures**: tap to start/stop or check, double-tap to describe everything in view,
+  long-press to repeat the last message (all also in TalkBack's actions menu)
+- **English and Urdu** voice (اردو), chosen in Settings
+- **Settings**: language, speech speed and how much to say (quiet / normal / detailed)
+- **Spoken tutorial** on first launch, replayable from Settings
 - **Tap anywhere** to start or stop, so you don't need to find a button
 - **Auto flashlight** that switches on in the dark using the light sensor (Android)
 - Speech-paced loop: the next frame is only captured after the current description finishes
@@ -101,7 +106,7 @@ eas build -p android --profile development   # install once, then: npx expo star
 - [ ] Distance estimation
 - [x] Only announce changes in the scene, most important first
 - [ ] Currency recognition
-- [ ] Urdu voice output
+- [x] Urdu voice output
 - [ ] Voice commands and an SOS gesture
 
 ## Tests

@@ -1,7 +1,7 @@
 // Run with: npm test   (uses Node's built-in test runner, no extra packages)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createAnnouncer, type DetectedObject, type Position } from './announcer.ts';
+import { createAnnouncer, describeScene, VERBOSITY_OPTIONS, type DetectedObject, type Position } from './announcer.ts';
 
 const obj = (label: string, position: Position, area: number, confidence = 0.9): DetectedObject =>
   ({ label, position, area, confidence });
@@ -68,4 +68,19 @@ test('heartbeat mentions objects that are still around', () => {
   }
   assert.equal(a.update([obj('chair', 'left', 0.05)], null, 15000).speech,
     'Still around you: chair on the left.');
+});
+
+test('describeScene lists everything in view, most important first', () => {
+  assert.equal(
+    describeScene([obj('chair', 'left', 0.05), obj('car', 'center', 0.4), obj('person', 'right', 0.1)], 'EXIT'),
+    'Car ahead, very close. Person on the right, near. Chair on the left. Text: EXIT.',
+  );
+  assert.equal(describeScene([], null), 'Nothing detected. The path looks clear.');
+});
+
+test('quiet mode skips far objects until they come near', () => {
+  const a = createAnnouncer(VERBOSITY_OPTIONS.quiet);
+  a.update([], null, 0);
+  assert.equal(a.update([obj('chair', 'left', 0.05)], null, 1000).speech, null);
+  assert.equal(a.update([obj('chair', 'left', 0.12)], null, 2000).speech, 'Chair on the left, near.');
 });

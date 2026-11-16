@@ -4,11 +4,15 @@ import * as Haptics from 'expo-haptics';
 import { LightSensor } from 'expo-sensors';
 import { File } from 'expo-file-system';
 import { useRef, useEffect, useState } from 'react';
+import { useRouter } from 'expo-router';
 import {
   View, Text, StyleSheet, TouchableOpacity, Pressable,
   StatusBar, Animated, Platform
 } from 'react-native';
-import { createAnnouncer, type Announcement, type DetectedObject } from '../lib/announcer';
+import {
+  createAnnouncer, describeScene, VERBOSITY_OPTIONS, type Announcement, type DetectedObject,
+} from '../lib/announcer';
+import { getSettings, SPEECH_RATES } from '../lib/settings';
 import { detectOnDevice, loadDetector } from '../lib/onDeviceDetector';
 
 // Detection runs on the phone by default. Optionally set EXPO_PUBLIC_BACKEND_URL
@@ -21,6 +25,10 @@ const SERVER_RETRY_MS = 30000;
 // Pause between frames. Shorter when nothing was said, so changes are caught quickly.
 const PAUSE_AFTER_SPEECH_MS = 800;
 const PAUSE_WHEN_QUIET_MS = 300;
+// Two taps within this time count as a double-tap.
+const DOUBLE_TAP_MS = 300;
+
+const currentRate = () => SPEECH_RATES[getSettings().speechSpeed];
 
 type ServerResult = {
   text: string;
@@ -79,6 +87,7 @@ const deletePhoto = (uri: string) => {
 };
 
 export default function HomeScreen() {
+  const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
   const [status, setStatus] = useState('Tap anywhere to start');
   const [running, setRunning] = useState(false);
@@ -98,6 +107,17 @@ export default function HomeScreen() {
   // While the server is unreachable, skip it until this time (ms since epoch).
   const serverRetryAtRef = useRef(0);
   const usingServerRef = useRef(BACKEND !== null);
+  // Gestures: last message (long-press repeats it), pending double-tap, describe-now requests.
+  const lastSpokenRef = useRef<string | null>(null);
+  const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const describeRequestedRef = useRef(false);
+  const describeBusyRef = useRef(false);
+
+  /** Speaks at the user's chosen speed and remembers the message for "repeat". */
+  const say = (text: string, urgent = false) => {
+    lastSpokenRef.current = text;
+    return speakAndWait(text, currentRate() + (urgent ? 0.1 : 0), urgent ? 0.95 : 1.0);
+  };
 
   // Load the on-device model early so the first scan starts quickly.
   useEffect(() => {
@@ -109,7 +129,11 @@ export default function HomeScreen() {
   // Welcome message
   useEffect(() => {
     const timer = setTimeout(() => {
-      speakAndWait('Welcome to Virtual Eye. Tap anywhere on the screen to start scanning your environment.');
+      speakAndWait(
+        'Welcome to Virtual Eye. Tap anywhere to start scanning. ' +
+        'Double-tap to describe everything in view. Long-press to repeat the last message.',
+        currentRate(),
+      );
     }, 800);
     return () => clearTimeout(timer);
   }, []);
@@ -122,6 +146,7 @@ export default function HomeScreen() {
       // eslint-disable-next-line react-hooks/exhaustive-deps
       loopIdRef.current++;
       if (manualTimerRef.current) clearTimeout(manualTimerRef.current);
+      if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
       Speech.stop();
     };
   }, []);
@@ -198,7 +223,7 @@ export default function HomeScreen() {
   const detectionLoop = async (loopId: number) => {
     const isActive = () => runningRef.current && loopIdRef.current === loopId;
 
-    await speakAndWait('Detection started. I will guide you through your surroundings.');
+    await say('Detection started. I will guide you through your surroundings.');
 
     while (isActive()) {
       try {
@@ -221,7 +246,7 @@ export default function HomeScreen() {
 
         if (!isActive()) break;
 
-        if (frame.notice) await speakAndWait(frame.notice);
+        if (frame.notice) await say(frame.notice);
 
         const { analysis } = frame;
         const announcement: Announcement = analysis.kind === 'objects'
@@ -231,17 +256,22 @@ export default function HomeScreen() {
         setStatus(announcement.summary);
         setIsWarning(announcement.warning);
 
-        if (announcement.speech) {
+        // A double-tap during scanning asks for the full picture on the next frame.
+        let speech = announcement.speech;
+        if (describeRequestedRef.current) {
+          describeRequestedRef.current = false;
+          speech = analysis.kind === 'objects' ? describeScene(analysis.objects, analysis.ocr) : analysis.text;
+        }
+
+        if (speech) {
           if (announcement.warning) {
             await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            await speakAndWait(announcement.speech, 0.65, 0.95);
-          } else {
-            await speakAndWait(announcement.speech, 0.55, 1.0);
           }
+          await say(speech, announcement.warning);
         }
 
         if (isActive()) {
-          await sleep(announcement.speech ? PAUSE_AFTER_SPEECH_MS : PAUSE_WHEN_QUIET_MS);
+          await sleep(speech ? PAUSE_AFTER_SPEECH_MS : PAUSE_WHEN_QUIET_MS);
         }
 
       } catch {
@@ -249,7 +279,7 @@ export default function HomeScreen() {
         const errMsg = 'Detection is not working right now. Trying again.';
         setStatus('❌ ' + errMsg);
         setIsWarning(false);
-        await speakAndWait(errMsg);
+        await say(errMsg);
         await sleep(4000);
       }
     }
@@ -257,7 +287,7 @@ export default function HomeScreen() {
 
   const startDetection = () => {
     const loopId = ++loopIdRef.current;
-    announcerRef.current.reset();
+    announcerRef.current = createAnnouncer(VERBOSITY_OPTIONS[getSettings().verbosity]);
     serverRetryAtRef.current = 0; // give the server a fresh chance on every start
     runningRef.current = true;
     setRunning(true);
@@ -272,12 +302,75 @@ export default function HomeScreen() {
     setRunning(false);
     setIsWarning(false);
     setStatus('Tap anywhere to start');
-    speakAndWait('Detection stopped. Tap anywhere to start again.');
+    say('Detection stopped. Tap anywhere to start again.');
   };
 
   const handleScreenTap = () => {
     if (running) stopDetection();
     else startDetection();
+  };
+
+  /** Describes everything in view right now, not just what changed. */
+  const describeNow = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (runningRef.current) {
+      describeRequestedRef.current = true;
+      Speech.stop(); // cut the current message so the description comes quickly
+      return;
+    }
+    if (describeBusyRef.current || !cameraRef.current) return;
+    describeBusyRef.current = true;
+    try {
+      setStatus('Looking...');
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.4, shutterSound: false });
+      if (!photo) return;
+      let frame: Awaited<ReturnType<typeof analyzeFrame>>;
+      try {
+        frame = await analyzeFrame(photo.uri);
+      } finally {
+        deletePhoto(photo.uri);
+      }
+      const { analysis } = frame;
+      const text = analysis.kind === 'objects' ? describeScene(analysis.objects, analysis.ocr) : analysis.text;
+      setStatus(text);
+      await say(text);
+    } catch {
+      setStatus('Tap anywhere to start');
+      await say('I could not look right now. Please try again.');
+    } finally {
+      describeBusyRef.current = false;
+    }
+  };
+
+  const repeatLast = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    say(lastSpokenRef.current ?? 'Nothing to repeat yet.');
+  };
+
+  // One tap toggles scanning; a second tap within DOUBLE_TAP_MS makes it a double-tap.
+  const handlePress = () => {
+    if (tapTimerRef.current) {
+      clearTimeout(tapTimerRef.current);
+      tapTimerRef.current = null;
+      describeNow();
+      return;
+    }
+    tapTimerRef.current = setTimeout(() => {
+      tapTimerRef.current = null;
+      handleScreenTap();
+    }, DOUBLE_TAP_MS);
+  };
+
+  const openSettings = () => {
+    if (running) {
+      runningRef.current = false;
+      loopIdRef.current++;
+      setRunning(false);
+      setIsWarning(false);
+      setStatus('Tap anywhere to start');
+    }
+    Speech.stop();
+    router.push('/settings');
   };
 
   const toggleTorch = () => {
@@ -287,7 +380,7 @@ export default function HomeScreen() {
 
     const next = !torchOn;
     setTorchOn(next);
-    speakAndWait(next ? 'Flashlight on.' : 'Flashlight off.');
+    say(next ? 'Flashlight on.' : 'Flashlight off.');
 
     if (manualTimerRef.current) clearTimeout(manualTimerRef.current);
     manualTimerRef.current = setTimeout(() => {
@@ -328,22 +421,46 @@ export default function HomeScreen() {
         animateShutter={false}
       />
 
-      {/* Full-screen tap target. Panels above pass touches through to it,
-          so tapping anywhere except the torch button starts/stops detection. */}
+      {/* Full-screen tap target. Panels above pass touches through to it, so
+          anywhere except the top-bar buttons works: tap = start/stop,
+          double-tap = describe now, long-press = repeat. With TalkBack, the
+          same actions are in the actions menu. */}
       <Pressable
         style={StyleSheet.absoluteFill}
-        onPress={handleScreenTap}
+        onPress={handlePress}
+        onLongPress={repeatLast}
+        delayLongPress={600}
         accessibilityRole="button"
         accessibilityLabel={running ? 'Stop scanning' : 'Start scanning'}
         accessibilityHint={running
-          ? 'Stops describing your surroundings'
-          : 'Starts describing your surroundings out loud'}
+          ? 'Stops describing your surroundings. More actions available.'
+          : 'Starts describing your surroundings out loud. More actions available.'}
+        accessibilityActions={[
+          { name: 'activate' },
+          { name: 'longpress', label: 'Repeat last message' },
+          { name: 'describe', label: 'Describe everything now' },
+        ]}
+        onAccessibilityAction={({ nativeEvent }) => {
+          if (nativeEvent.actionName === 'activate') handleScreenTap();
+          else if (nativeEvent.actionName === 'longpress') repeatLast();
+          else if (nativeEvent.actionName === 'describe') describeNow();
+        }}
       />
 
       {/* Top bar */}
       <View style={styles.topBar} pointerEvents="box-none">
         <Text style={styles.topBarTitle} accessibilityRole="header">👁️ Virtual Eye</Text>
         <View style={styles.topBarRight} pointerEvents="box-none">
+
+          <TouchableOpacity
+            onPress={openSettings}
+            style={styles.torchBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+            accessibilityHint="Speech speed and how much to say"
+          >
+            <Text style={styles.torchIcon}>⚙️</Text>
+          </TouchableOpacity>
 
           {/* Torch button — shows AUTO label when sensor is controlling it */}
           <TouchableOpacity
@@ -393,8 +510,8 @@ export default function HomeScreen() {
 
         <Text style={styles.hint} importantForAccessibility="no">
           {running
-            ? 'Tap anywhere on screen to stop'
-            : 'Tap anywhere on screen to start'}
+            ? 'Tap: stop · Double-tap: describe · Hold: repeat'
+            : 'Tap: start · Double-tap: describe · Hold: repeat'}
         </Text>
       </View>
     </View>

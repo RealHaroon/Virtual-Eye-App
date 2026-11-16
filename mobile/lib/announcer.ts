@@ -43,6 +43,8 @@ export type AnnouncerOptions = {
   maxItems: number;
   /** Ignore detections below this confidence. */
   minConfidence: number;
+  /** Don't announce objects farther than this ('near' = only near or very close). */
+  minProximity: Proximity;
 };
 
 export const DEFAULT_OPTIONS: AnnouncerOptions = {
@@ -51,6 +53,18 @@ export const DEFAULT_OPTIONS: AnnouncerOptions = {
   heartbeatMs: 15000,
   maxItems: 3,
   minConfidence: 0.35,
+  minProximity: 'far',
+};
+
+/** How much the app talks. Chosen in Settings. */
+export type Verbosity = 'quiet' | 'normal' | 'detailed';
+
+export const VERBOSITY_OPTIONS: Record<Verbosity, Partial<AnnouncerOptions>> = {
+  // Only things that are near or very close, plus text; rare "still here" updates.
+  quiet: { minProximity: 'near', maxItems: 2, heartbeatMs: 30000 },
+  normal: {},
+  // More objects, more often, including less certain ones.
+  detailed: { maxItems: 4, heartbeatMs: 8000, minConfidence: 0.3 },
 };
 
 /** Bounding box share of the frame at which an object counts as close / near. */
@@ -132,6 +146,22 @@ export function phrase(item: SceneItem): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+/**
+ * Full description of everything in view, for "describe now" (double-tap),
+ * regardless of what was already announced.
+ */
+export function describeScene(
+  objects: DetectedObject[],
+  ocrText: string | null,
+  { maxItems = 5, minConfidence = DEFAULT_OPTIONS.minConfidence } = {},
+): string {
+  const parts = groupByLabel(objects, minConfidence).slice(0, maxItems).map(phrase);
+  const ocr = ocrText?.trim();
+  if (ocr) parts.push(`Text: ${ocr}`);
+  if (parts.length === 0) return 'Nothing detected. The path looks clear.';
+  return parts.join('. ') + '.';
+}
+
 const normalizeText = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim();
 
 type Memory = {
@@ -172,7 +202,8 @@ export function createAnnouncer(overrides: Partial<AnnouncerOptions> = {}) {
         (isClose && prev.position !== item.position) ||
         (isClose && now - prev.lastSpoken >= opts.warningRepeatMs);
 
-      if (isNews) news.push(item);
+      const farEnough = PROXIMITY_RANK[proximity] >= PROXIMITY_RANK[opts.minProximity];
+      if (isNews && farEnough) news.push(item);
       memory.set(item.label, {
         proximity,
         position: item.position,

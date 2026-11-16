@@ -76,8 +76,9 @@ The app does **not** run in Expo Go (native TFLite and ML Kit modules).
   are English for now. Urdu needs an Urdu TTS voice on the phone; Settings checks and
   explains how to install it.
 - **Accessibility is the product.** Every control needs `accessibilityRole`/`Label`.
-  The full-screen `Pressable` handles tap / double-tap / long-press and exposes the same
-  as TalkBack `accessibilityActions`. Test with TalkBack on.
+  The full-screen gesture `View` (`lib/useScreenGestures.ts`) handles tap / double-tap /
+  long-press / swipe and exposes the same as TalkBack `accessibilityActions`. Test with
+  TalkBack on.
 
 ## Owner preferences
 
